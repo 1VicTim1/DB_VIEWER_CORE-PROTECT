@@ -135,7 +135,7 @@ function checkForUpdates() {
 })();
 
 
-// Функция сохранен��я координат в файл
+// Функция сохранения координат в файл
 function saveCoordsToFile(coords) {
     try {
         fs.writeFileSync('./coords.json', JSON.stringify(coords), 'utf8');
