@@ -8,7 +8,7 @@ const request = require('request');
 let debugMode = false;
 
 // Версия скрипта
-const CURRENT_VERSION = '3.0';
+const CURRENT_VERSION = '5.0';
 
 // Путь к конфигурационному файлу
 const configPath = path.join(__dirname, 'config.json');
