@@ -5,6 +5,8 @@ const path = require('path'); // Для работы с путями файло�
 const https = require('https'); // Для загрузки файлов по HTTPS
 const request = require('request');
 
+let debugMode = false;
+
 // Версия скрипта
 const CURRENT_VERSION = '3.0';
 
@@ -89,7 +91,7 @@ function checkForUpdates() {
         }
 
         // Создаем config.json с начальной настройкой
-        const initialConfig = { dbPath, autoUpdate: true }; // Включаем автообновление по умолчанию
+        const initialConfig = { dbPath, autoUpdate: true, playerCoords: { x: 0, y: 0, z: 0 } }; // Включаем автообновление по умолчанию и создаем начальные координаты
         fs.writeFileSync(configPath, JSON.stringify(initialConfig), 'utf8');
         console.log('Конфигурация сохранена.');
     } else {
@@ -97,6 +99,9 @@ function checkForUpdates() {
         const configData = fs.readFileSync(configPath, 'utf8');
         const config = JSON.parse(configData);
         dbPath = config.dbPath;
+
+        // Загружаем координаты из config.json
+        playerCoords = config.playerCoords || { x: 0, y: 0, z: 0 };
     }
 
     // Подключение к базе данных
@@ -118,7 +123,7 @@ function checkForUpdates() {
             let filterType = null;     // Инициализация типа фильтра
             let filterValue = null;    // Инициализация значения фильтра
             let actionFilter = null;   // Инициализация фильтра действий
-        
+            
             for (let i = 0; i < arguments.length; i++) {
                 if (arguments[i] === '--help') {
                     showHelp();         // Показываем помощь и прерываем выполнение
@@ -131,8 +136,12 @@ function checkForUpdates() {
                     filterValue = arguments[i + 1]?.trim();
                 } else if (arguments[i] === '-a') {
                     actionFilter = arguments[i + 1]; // Фильтр по действию
+                } else if (arguments[i].startsWith('r:')) {
+                    // Обрабатываем запись вида "r:10"
+                    radiusFilter = parseFloat(arguments[i].slice(2)); // Извлекаем значение после "r:"
                 } else if (arguments[i] === '-r') {
-                    radiusFilter = parseFloat(arguments[i + 1]); // Радиус для фильтрации
+                    // Обрабатываем запись вида "-r 10"
+                    radiusFilter = parseFloat(arguments[i + 1]);
                 } else if (arguments[i] === '--teleport') {
                     if (i + 4 < arguments.length && arguments[i + 1] && arguments[i + 2] && arguments[i + 3] && arguments[i + 4]) {
                         teleportArgs = {
@@ -162,13 +171,23 @@ function checkForUpdates() {
                 } else if (arguments[i] === '--enable-auto-update') {
                     enableAutoUpdate();
                     return;
+                } else if (arguments[i] === '--debug') {
+                    debugMode = true; // Включаем режим отладки
                 }
             }
-            
+
+            // Выводим логи промежуточных значений
+            if (debugMode) {
+                console.log('DEBUG: Radius Filter:', radiusFilter);
+                console.log('DEBUG: Filter Type:', filterType);
+                console.log('DEBUG: Filter Value:', filterValue);
+                console.log('DEBUG: Action Filter:', actionFilter);
+            }
+
             if (teleportArgs) {
                 await handleTeleportation(teleportArgs);
             }
-            
+
             getEventsWithinRadius(db, radiusFilter, filterType, filterValue, actionFilter);
         }
     });
@@ -262,7 +281,9 @@ async function saveCoordsToFile(coords) {
 
 // Функция для получения событий в пределах заданного радиуса
 function getEventsWithinRadius(db, radius, filterType, filterValue, actionFilter) {
-    let sql = ` SELECT b.time, u.id, u.user, b.x, b.y, b.z, b.action FROM co_block AS b JOIN co_user AS u ON b.user = u.id `;
+    let sql = ` SELECT b.time, u.id, u.user, b.x, b.y, b.z, b.action 
+                 FROM co_block AS b 
+                 JOIN co_user AS u ON b.user = u.id `;
 
     let params = [];
     let whereClauseAdded = false; // Флаг для отслеживания первого условия WHERE
@@ -309,6 +330,12 @@ function getEventsWithinRadius(db, radius, filterType, filterValue, actionFilter
         } else if (actionFilter === 'b*') {
             sql += '(b.action != 1 AND b.action != 2 AND b.action != 3)';
         }
+    }
+
+    // Отладочная информация
+    if (debugMode) {
+        console.log('DEBUG: SQL Query:', sql);
+        console.log('DEBUG: Params:', params);
     }
 
     // Выполнение запроса
