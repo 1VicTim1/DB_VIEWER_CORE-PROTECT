@@ -6,7 +6,7 @@ const https = require('https'); // Для загрузки файлов по HTT
 const request = require('request');
 
 // Версия скрипта
-const CURRENT_VERSION = '2.1alpha';
+const CURRENT_VERSION = '3.0';
 
 // Путь к конфигурационному файлу
 const configPath = path.join(__dirname, 'config.json');
@@ -19,34 +19,55 @@ const UPDATE_URL = 'https://raw.githubusercontent.com/1VicTim1/DB_VIEWER_CORE-PR
 
 // Функция для проверки обновлений
 function checkForUpdates() {
-    request(UPDATE_URL, (error, response, body) => {
-        if (!error && response.statusCode === 200) {
-            const updatedScript = body.toString();
-            let currentScript;
+    // Проверка наличия файла config.json
+    if (!fs.existsSync(configPath)) {
+        console.error('Файл config.json не найден. Автоматическое обновление невозможно.');
+        return;
+    }
 
-            try {
-                currentScript = fs.readFileSync(scriptPath, 'utf8');
-            } catch (err) {
-                console.error('Не удалось прочитать текущий скрипт:', err);
-                return;
-            }
+    // Считывание настроек из config.json
+    let configData;
+    try {
+        configData = fs.readFileSync(configPath, 'utf8');
+    } catch (err) {
+        console.error('Не удалось прочитать файл config.json:', err);
+        return;
+    }
+    const config = JSON.parse(configData);
+    
+    // Проверка флага autoUpdate
+    if (config.autoUpdate) {
+        request(UPDATE_URL, (error, response, body) => {
+            if (!error && response.statusCode === 200) {
+                const updatedScript = body.toString();
+                let currentScript;
 
-            if (updatedScript !== currentScript) {
-                console.log('Обнаружено обновление скрипта. Начинаю обновление...');
-                
                 try {
-                    fs.writeFileSync(scriptPath, updatedScript, 'utf8');
-                    console.log('Скрипт успешно обновлён.');
+                    currentScript = fs.readFileSync(scriptPath, 'utf8');
                 } catch (err) {
-                    console.error('Ошибка при обновлении скрипта:', err);
+                    console.error('Не удалось прочитать текущий скрипт:', err);
+                    return;
+                }
+
+                if (updatedScript !== currentScript) {
+                    console.log('Обнаружено обновление скрипта. Начинаю обновление...');
+                    
+                    try {
+                        fs.writeFileSync(scriptPath, updatedScript, 'utf8');
+                        console.log('Скрипт успешно обновлён.');
+                    } catch (err) {
+                        console.error('Ошибка при обновлении скрипта:', err);
+                    }
+                } else {
+                    console.log('Ваш скрипт уже обновлен до последней версии.');
                 }
             } else {
-                console.log('Ваш скрипт уже обновлен до последней версии.');
+                console.error('Ошибка при проверке обновлений:', error);
             }
-        } else {
-            console.error('Ошибка при проверке обновлений:', error);
-        }
-    });
+        });
+    } else {
+        console.log('Автоматическое обновление отключено.');
+    }
 }
 
 // Основная логика программы
@@ -67,13 +88,15 @@ function checkForUpdates() {
             process.exit(1);
         }
 
-        // Сохраняем путь в конфигурационный файл
-        fs.writeFileSync(configPath, JSON.stringify({ dbPath }), 'utf8');
+        // Создаем config.json с начальной настройкой
+        const initialConfig = { dbPath, autoUpdate: true }; // Включаем автообновление по умолчанию
+        fs.writeFileSync(configPath, JSON.stringify(initialConfig), 'utf8');
         console.log('Конфигурация сохранена.');
     } else {
         // Читаем путь из конфигурационного файла
         const configData = fs.readFileSync(configPath, 'utf8');
-        dbPath = JSON.parse(configData).dbPath;
+        const config = JSON.parse(configData);
+        dbPath = config.dbPath;
     }
 
     // Подключение к базе данных
@@ -89,63 +112,111 @@ function checkForUpdates() {
         mainFunction(userArguments, db); // Передаем db в основную функцию
 
         // Функция для вызова основной логики с аргументами
-async function mainFunction(arguments, db) {
-    let teleportArgs = null;   // Инициализация переменной для телепортации
-    let radiusFilter = null;   // Инициализация радиуса фильтра
-    let filterType = null;     // Инициализация типа фильтра
-    let filterValue = null;    // Инициализация значения фильтра
-    let actionFilter = null;   // Инициализация фильтра действий
-
-    for (let i = 0; i < arguments.length; i++) {
-        const arg = arguments[i];
-
-        if (arg.startsWith('--help')) {
-            showHelp();         // Показываем помощь и прерываем выполнение
-            return;
-        } else if (arg.startsWith('--change-db')) {
-            changeDatabase();   // Меняем базу данных
-            return;
-        } else if (arg.startsWith('a:')) {
-            actionFilter = arg.split(':')[1]; // Фильтр по действию
-        } else if (arg.startsWith('r:')) {
-            radiusFilter = parseFloat(arg.split(':')[1]); // Радиус для фильтрации
-        } else if (arg.startsWith('u:')) {
-            filterType = 'user'; // Фильтрация по имени или номеру пользователя
-            filterValue = arg.split(':')[1]?.trim();
-        } else if (arg.startsWith('teleport')) {
-            if (i + 4 < arguments.length && arguments[i + 1] && arguments[i + 2] && arguments[i + 3] && arguments[i + 4]) {
-                teleportArgs = {
-                    x: parseInt(arguments[i + 1]),
-                    y: parseInt(arguments[i + 2]),
-                    z: parseInt(arguments[i + 3]),
-                    wid: parseInt(arguments[i + 4])
-                };
-            } else if (i + 3 < arguments.length && arguments[i + 1] && arguments[i + 2] && arguments[i + 3]) {
-                teleportArgs = {
-                    x: parseInt(arguments[i + 1]),
-                    y: parseInt(arguments[i + 2]),
-                    z: parseInt(arguments[i + 3])
-                };
-            } else if (i + 1 < arguments.length && arguments[i + 1]) {
-                teleportArgs = {
-                    wid: parseInt(arguments[i + 1])
-                };
-            } else {
-                // Команда --teleport без аргументов: вывод текущих координат
-                console.log('Текущие координаты:', playerCoords);
-                return;
+        async function mainFunction(arguments, db) {
+            let teleportArgs = null;   // Инициализация переменной для телепортации
+            let radiusFilter = null;   // Инициализация радиуса фильтра
+            let filterType = null;     // Инициализация типа фильтра
+            let filterValue = null;    // Инициализация значения фильтра
+            let actionFilter = null;   // Инициализация фильтра действий
+        
+            for (let i = 0; i < arguments.length; i++) {
+                if (arguments[i] === '--help') {
+                    showHelp();         // Показываем помощь и прерываем выполнение
+                    return;
+                } else if (arguments[i] === '--change-db') {
+                    changeDatabase();   // Меняем базу данных
+                    return;
+                } else if (arguments[i] === '-u') {
+                    filterType = 'user'; // Фильтрация по имени или номеру пользователя
+                    filterValue = arguments[i + 1]?.trim();
+                } else if (arguments[i] === '-a') {
+                    actionFilter = arguments[i + 1]; // Фильтр по действию
+                } else if (arguments[i] === '-r') {
+                    radiusFilter = parseFloat(arguments[i + 1]); // Радиус для фильтрации
+                } else if (arguments[i] === '--teleport') {
+                    if (i + 4 < arguments.length && arguments[i + 1] && arguments[i + 2] && arguments[i + 3] && arguments[i + 4]) {
+                        teleportArgs = {
+                            x: parseInt(arguments[i + 1]),
+                            y: parseInt(arguments[i + 2]),
+                            z: parseInt(arguments[i + 3]),
+                            wid: parseInt(arguments[i + 4])
+                        };
+                    } else if (i + 3 < arguments.length && arguments[i + 1] && arguments[i + 2] && arguments[i + 3]) {
+                        teleportArgs = {
+                            x: parseInt(arguments[i + 1]),
+                            y: parseInt(arguments[i + 2]),
+                            z: parseInt(arguments[i + 3])
+                        };
+                    } else if (i + 1 < arguments.length && arguments[i + 1]) {
+                        teleportArgs = {
+                            wid: parseInt(arguments[i + 1])
+                        };
+                    } else {
+                        // Команда --teleport без аргументов: вывод текущих координат
+                        console.log('Текущие координаты:', playerCoords);
+                        return;
+                    }
+                } else if (arguments[i] === '--disable-auto-update') {
+                    disableAutoUpdate();
+                    return;
+                } else if (arguments[i] === '--enable-auto-update') {
+                    enableAutoUpdate();
+                    return;
+                }
             }
+            
+            if (teleportArgs) {
+                await handleTeleportation(teleportArgs);
+            }
+            
+            getEventsWithinRadius(db, radiusFilter, filterType, filterValue, actionFilter);
         }
-    }
-    
-    if (teleportArgs) {
-        await handleTeleportation(teleportArgs);
-    }
-    
-    getEventsWithinRadius(db, radiusFilter, filterType, filterValue, actionFilter);
-}
     });
 })();
+
+// Функция для отключения автообновления
+function disableAutoUpdate() {
+    // Проверка наличия файла config.json
+    if (!fs.existsSync(configPath)) {
+        console.error('Файл config.json не найден. Отмена операции.');
+        return;
+    }
+
+    // Считывание настроек из config.json
+    let configData;
+    try {
+        configData = fs.readFileSync(configPath, 'utf8');
+    } catch (err) {
+        console.error('Не удалось прочитать файл config.json:', err);
+        return;
+    }
+    const config = JSON.parse(configData);
+    config.autoUpdate = false;
+    fs.writeFileSync(configPath, JSON.stringify(config), 'utf8');
+    console.log('Автообновление отключено.');
+}
+
+// Функция для включения автообновления
+function enableAutoUpdate() {
+    // Проверка наличия файла config.json
+    if (!fs.existsSync(configPath)) {
+        console.error('Файл config.json не найден. Отмена операции.');
+        return;
+    }
+
+    // Считывание настроек из config.json
+    let configData;
+    try {
+        configData = fs.readFileSync(configPath, 'utf8');
+    } catch (err) {
+        console.error('Не удалось прочитать файл config.json:', err);
+        return;
+    }
+    const config = JSON.parse(configData);
+    config.autoUpdate = true;
+    fs.writeFileSync(configPath, JSON.stringify(config), 'utf8');
+    console.log('Автообновление включено.');
+}
 
 // Функция для обработки команды телепортации
 async function handleTeleportation(args) {
@@ -288,7 +359,7 @@ async function getWorldNameById(wid) {
 
 // Функция помощи
 function showHelp() {
-    console.log(` Скрипт для работы с базой данных и событиями. Использование: node script.js [опции] Опции: --help Показать это сообщение помощи. --change-db Изменить путь к базе данных. --no-updates Отключить автоматическое обновление скрипта. a:ACTION Фильтровать события по действию ('b+', 'b-', 'b', 'b*'). r:RADIUS Указать радиус для фильтрации событий. u:USERNAME_OR_ID Фильтровать события по пользователю. --teleport X Y Z WID Телепортирует игрока в указанный мир на указанные координаты. --teleport WID Телепортирует игрока в указанный мир на предыдущие координаты. --teleport Выводит текущие координаты игрока. Примеры: node script.js --teleport 100 200 300 5 Телепортация в мир с ID 5 на координаты (100, 200, 300) node script.js --teleport 5 Телепортация в мир с ID 5 на предыдущие координаты node script.js --teleport Вывод текущих координат node script.js r:10 Показать события в радиусе 10 единиц node script.js u:Brain Показать события пользователя "Brain" node script.js a:b+ Показать события установки блоков node script.js --change-db Изменить путь к базе данных `);
+    console.log(` node db_viewer.js u:[имя_или_номер] a:[действие] r:[радиус] --teleport [x y z [world]] --change-database  --disable-auto-update --enable-auto-update`);
 }
 
 // Функция для смены базы данных
