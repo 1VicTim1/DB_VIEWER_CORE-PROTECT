@@ -1,0 +1,292 @@
+const sqlite3 = require('sqlite3').verbose();
+const readlineSync = require('readline-sync'); // Для взаимодействия с пользователем
+const fs = require('fs'); // Для работы с файлами
+const path = require('path'); // Для работы с путями файлов
+
+// Путь к конфигурационному файлу
+const configPath = path.join(__dirname, 'config.json');
+
+// Инициализация переменной dbPath
+let dbPath;
+
+// Проверяем существование конфигурационного файла
+if (!fs.existsSync(configPath)) {
+    // Если файл не существует, запрашиваем путь к базе данных
+    dbPath = readlineSync.question('Укажите путь к базе данных (.db): ');
+    const dbDir = path.dirname(dbPath);
+
+    // Проверяем существование указанной папки
+    if (!fs.existsSync(dbDir)) {
+        console.error(`Указанная директория "${dbDir}" не существует.`);
+        process.exit(1);
+    }
+
+    // Сохраняем путь в конфигурационный файл
+    fs.writeFileSync(configPath, JSON.stringify({ dbPath }), 'utf8');
+    console.log('Конфигурация сохранена.');
+} else {
+    // Читаем путь из конфигурационного файла
+    const configData = fs.readFileSync(configPath, 'utf8');
+    dbPath = JSON.parse(configData).dbPath;
+}
+
+// Текущие координаты игрока (по умолчанию 0, 0, 0)
+let playerCoords = { x: 0, y: 0, z: 0 };
+
+// Загрузка координат из файла
+try {
+    const coordsData = fs.readFileSync('./coords.json', 'utf8');
+    playerCoords = JSON.parse(coordsData);
+    console.log('Загружены координаты:', playerCoords);
+} catch (error) {
+    console.log('Не удалось загрузить координаты из файла. Используются начальные координаты.');
+}
+
+// Подключение к базе данных
+let db = new sqlite3.Database(dbPath, sqlite3.OPEN_READWRITE, async (err) => {
+    if (err) {
+        console.error(err.message);
+        return;
+    }
+    console.log('Connected to the database');
+
+    // Получение аргументов из командной строки
+    const userArguments = process.argv.slice(2);
+    let filterType = null;
+    let filterValue = null;
+    let actionFilter = null;
+    let radiusFilter = null;
+    let teleportArgs = null;
+
+    // Обработка аргументов
+    for (let i = 0; i < userArguments.length; i++) {
+        if (userArguments[i] === '--help') {
+            showHelp(); // Показываем помощь и прерываем выполнение
+            return;
+        } else if (userArguments[i] === '--change-db') {
+            changeDatabase(); // Меняем базу данных
+            return;
+        } else if (userArguments[i] === '-u') {
+            filterType = 'user'; // Фильтрация по имени или номеру пользователя
+            filterValue = userArguments[i + 1]?.trim();
+        } else if (userArguments[i] === '-a') {
+            actionFilter = userArguments[i + 1]; // Фильтр по действию
+        } else if (userArguments[i] === '-r') {
+            radiusFilter = parseFloat(userArguments[i + 1]); // Радиус для фильтрации
+        } else if (userArguments[i] === '--teleport') {
+            if (i + 4 < userArguments.length && userArguments[i + 1] && userArguments[i + 2] && userArguments[i + 3] && userArguments[i + 4]) {
+                teleportArgs = {
+                    x: parseInt(userArguments[i + 1]),
+                    y: parseInt(userArguments[i + 2]),
+                    z: parseInt(userArguments[i + 3]),
+                    wid: parseInt(userArguments[i + 4])
+                };
+            } else if (i + 3 < userArguments.length && userArguments[i + 1] && userArguments[i + 2] && userArguments[i + 3]) {
+                teleportArgs = {
+                    x: parseInt(userArguments[i + 1]),
+                    y: parseInt(userArguments[i + 2]),
+                    z: parseInt(userArguments[i + 3])
+                };
+            } else if (i + 1 < userArguments.length && userArguments[i + 1]) {
+                teleportArgs = {
+                    wid: parseInt(userArguments[i + 1])
+                };
+            } else {
+                console.log('Неправильный синтаксис команды телепортации. Используйте: --teleport X Y Z WID или --teleport WID');
+                return;
+            }
+        }
+    }
+
+    // Если переданы аргументы для телепортации
+    if (teleportArgs) {
+        await handleTeleportation(teleportArgs);
+    }
+
+    // Вызов функции с фильтрами
+    getEventsWithinRadius(radiusFilter, filterType, filterValue, actionFilter);
+});
+
+// Функция сохранения координат в файл
+function saveCoordsToFile(coords) {
+    try {
+        fs.writeFileSync('./coords.json', JSON.stringify(coords), 'utf8');
+        console.log('Координаты успешно сохранены в файл.');
+    } catch (error) {
+        console.error('Ошибка при сохранении координат в файл:', error);
+    }
+}
+
+// Функция для обработки команды телепортации
+async function handleTeleportation(args) {
+    let { x, y, z, wid } = args;
+
+    // Если не указан мир, используем текущий мир
+    if (!wid) {
+        wid = await getCurrentWorldId();
+    }
+
+    // Если не указаны координаты, используем последние координаты
+    if (!x || !y || !z) {
+        ({ x, y, z } = playerCoords);
+    }
+
+    // Получаем название мира
+    const worldName = await getWorldNameById(wid);
+
+    // Обрабатываем результаты
+    if (worldName) {
+        console.log(`Телепортирование в мир ${worldName} на координаты (${x}, ${y}, ${z}).`);
+        playerCoords = { x, y, z }; // Обновляем координаты игрока
+        saveCoordsToFile(playerCoords); // Сохраняем координаты в файл
+    } else {
+        console.log(`Мир с ID ${wid} не найден.`);
+    }
+}
+
+// Функция для получения текущего мира
+async function getCurrentWorldId() {
+    return new Promise((resolve, reject) => {
+        db.get("SELECT wid FROM co_player WHERE uid = ?", [playerUid], (err, row) => {
+            if (err) {
+                reject(err);
+            } else if (row) {
+                resolve(row.wid);
+            } else {
+                resolve(null); // Мир не найден
+            }
+        });
+    });
+}
+
+function getEventsWithinRadius(radius, filterType, filterValue, actionFilter) {
+    let sql = `
+        SELECT b.time, u.id, u.user, b.x, b.y, b.z, b.action
+        FROM co_block AS b
+        JOIN co_user AS u ON b.user = u.id
+    `;
+
+    let params = [];
+    let whereClauseAdded = false; // Флаг для отслеживания первого условия WHERE
+
+    // Добавляем условие по радиусу
+    if (radius !== undefined && radius > 0) {
+        if (!whereClauseAdded) {
+            sql += ' WHERE ';
+            whereClauseAdded = true;
+        } else {
+            sql += ' AND ';
+        }
+        
+        sql += `
+            SQRT(
+                POWER(b.x - ?, 2) +
+                POWER(b.y - ?, 2) +
+                POWER(b.z - ?, 2)
+            ) <= ?
+        `;
+        params.push(playerCoords.x, playerCoords.y, playerCoords.z, radius);
+    }
+
+    // Добавление условия по типу фильтра
+    if (filterType === 'user') {
+        if (!whereClauseAdded) {
+            sql += ' WHERE ';
+            whereClauseAdded = true;
+        } else {
+            sql += ' AND ';
+        }
+        sql += `(u.user = ? OR u.id = ?)`;
+        params.push(filterValue, filterValue);
+    }
+
+    // Добавление условия по действию
+    if (actionFilter) {
+        if (!whereClauseAdded) {
+            sql += ' WHERE ';
+            whereClauseAdded = true;
+        } else {
+            sql += ' AND ';
+        }
+        if (actionFilter === 'b+') {
+            sql += 'b.action = 2';
+        } else if (actionFilter === 'b-') {
+            sql += 'b.action = 3';
+        } else if (actionFilter === 'b') {
+            sql += '(b.action = 2 OR b.action = 3)';
+        } else if (actionFilter === 'b*') {
+            sql += '(b.action != 1 AND b.action != 2 AND b.action != 3)';
+        }
+    }
+
+    // Выполнение запроса
+    db.all(sql, params, (err, rows) => {
+        if (err) {
+            throw err;
+        }
+
+        // Вывод результатов в консоль
+        rows.forEach(row => {
+            const { time, id, user, x, y, z, action } = row;
+            const readableTime = new Date(time * 1000).toLocaleString();
+            let actionText;
+            switch (action) {
+                case 3:
+                    actionText = 'поломка';
+                    break;
+                case 2:
+                    actionText = 'установка';
+                    break;
+                case 1:
+                    actionText = 'использование';
+                    break;
+                default:
+                    actionText = 'неопределённое действие';
+            }
+            console.log(`Таймер: ${readableTime}, Пользователь: #${id} (${user}), Координаты: (${x}, ${y}, ${z}), Действие: ${actionText}`);
+        });
+    });
+}
+
+// Функция для получения названия мира по идентификатору
+async function getWorldNameById(wid) {
+    return new Promise((resolve, reject) => {
+        db.get("SELECT world FROM co_world WHERE id = ?", [wid], (err, row) => {
+            if (err) {
+                reject(err);
+            } else if (row) {
+                resolve(row.world);
+            } else {
+                resolve(null); // Мир не найден
+            }
+        });
+    });
+}
+
+// Функция помощи
+function showHelp() {
+    console.log(` Скрипт для работы с базой данных и событиями. Использование: node btest.js [опции] Опции: --help Показать это сообщение помощи. --change-db Изменить путь к базе данных. --teleport X Y Z WID Телепортирует игрока в указанный мир на указанные координаты. --teleport WID Телепортирует игрока в указанный мир на предыдущие координаты. --teleport Выводит текущие координаты игрока. -r RADIUS Указать радиус для фильтрации событий. -u USERNAME_OR_ID Фильтровать события по пользователю. -a ACTION Фильтровать события по действию ('b+', 'b-', 'b', 'b*'). Примеры: node btest.js --teleport 100 200 300 5 # Телепортация в мир с ID 5 на координаты (100, 200, 300) node btest.js --teleport 5 # Телепортация в мир с ID 5 на предыдущие координаты node btest.js --teleport # Вывод текущих координат node btest.js -r 10 # Показать события в радиусе 10 единиц node btest.js -u Brain # Показать события пользователя "Brain" node btest.js -a b+ # Показать события установки блоков node btest.js --change-db # Изменить путь к базе данных `);
+}
+
+// Функция для смены базы данных
+function changeDatabase() {
+    // Запрашиваем новый путь к базе данных
+    const newDbPath = readlineSync.question('Укажите новый путь к базе данных (.db): ');
+    const dbDir = path.dirname(newDbPath);
+
+    // Проверяем существование указанной папки
+    if (!fs.existsSync(dbDir)) {
+        console.error(`Указанная директория "${dbDir}" не существует.`);
+        process.exit(1);
+    }
+
+    // Обновляем конфигурационный файл
+    fs.writeFileSync(
+        configPath,
+        JSON.stringify({
+            dbPath: newDbPath  // Сохранение нового пути к базе данных
+        }),
+        'utf8'
+    );
+    console.log('Конфигурация успешно обновлена!');
+}
