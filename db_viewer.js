@@ -5,7 +5,7 @@ const path = require('path'); // Для работы с путями файло�
 const https = require('https'); // Для загрузки файлов по HTTPS
 
 // Версия скрипта
-const CURRENT_VERSION = '2.1dev';
+const CURRENT_VERSION = '2.1alpha';
 
 // Путь к конфигурационному файлу
 const configPath = path.join(__dirname, 'config.json');
@@ -24,7 +24,7 @@ function checkForUpdates() {
             // Сравниваем содержимое загруженного файла с текущим скриптом
             const updatedScript = chunk.toString();
             const currentScript = fs.readFileSync(scriptPath, 'utf8');
-            
+
             // Если содержимое отличается, заменяем текущий скрипт новым
             if (updatedScript !== currentScript) {
                 console.log('Обнаружено обновление скрипта. Начинаю обновление...');
@@ -72,64 +72,68 @@ function checkForUpdates() {
     }
 
     // Подключение к базе данных
-    let db = new sqlite3.Database(dbPath, sqlite3.OPEN_READWRITE, async(err) => {
-    if (err) {
-        console.error(err.message);
-        return;
-    }
-    console.log('Connected to the database');
-
+    let db = new sqlite3.Database(dbPath, sqlite3.OPEN_READWRITE, async (err) => {
+        if (err) {
+            console.error(err.message);
+            return;
+        }
+        console.log('Connected to the database');
 
         // Обработка аргументов
-        for (let i = 0; i < userArguments.length; i++) {
-            if (userArguments[i] === '--help') {
-                showHelp(); // Показываем помощь и прерываем выполнение
-                return;
-            } else if (userArguments[i] === '--change-db') {
-                changeDatabase(); // Меняем базу данных
-                return;
-            } else if (userArguments[i] === '-u') {
-                filterType = 'user'; // Фильтрация по имени или номеру пользователя
-                filterValue = userArguments[i + 1]?.trim();
-            } else if (userArguments[i] === '-a') {
-                actionFilter = userArguments[i + 1]; // Фильтр по действию
-            } else if (userArguments[i] === '-r') {
-                radiusFilter = parseFloat(userArguments[i + 1]); // Радиус для фильтрации
-            } else if (userArguments[i] === '--teleport') {
-                if (i + 4 < userArguments.length && userArguments[i + 1] && userArguments[i + 2] && userArguments[i + 3] && userArguments[i + 4]) {
-                    teleportArgs = {
-                        x: parseInt(userArguments[i + 1]),
-                        y: parseInt(userArguments[i + 2]),
-                        z: parseInt(userArguments[i + 3]),
-                        wid: parseInt(userArguments[i + 4])
-                    };
-                } else if (i + 3 < userArguments.length && userArguments[i + 1] && userArguments[i + 2] && userArguments[i + 3]) {
-                    teleportArgs = {
-                        x: parseInt(userArguments[i + 1]),
-                        y: parseInt(userArguments[i + 2]),
-                        z: parseInt(userArguments[i + 3])
-                    };
-                } else if (i + 1 < userArguments.length && userArguments[i + 1]) {
-                    teleportArgs = {
-                        wid: parseInt(userArguments[i + 1])
-                    };
-                } else {
-                    // Команда --teleport без аргументов: вывод текущих координат
-                    console.log('Текущие координаты:', playerCoords);
+        let userArguments = process.argv.slice(2); // Получаем аргументы командной строки
+        mainFunction(userArguments); // Передаем их в основную функцию
+
+        // Функция для вызова основной логики с аргументами
+        async function mainFunction(arguments) {
+            for (let i = 0; i < arguments.length; i++) {
+                if (arguments[i] === '--help') {
+                    showHelp(); // Показываем помощь и прерываем выполнение
                     return;
+                } else if (arguments[i] === '--change-db') {
+                    changeDatabase(); // Меняем базу данных
+                    return;
+                } else if (arguments[i] === '-u') {
+                    filterType = 'user'; // Фильтрация по имени или номеру пользователя
+                    filterValue = arguments[i + 1]?.trim();
+                } else if (arguments[i] === '-a') {
+                    actionFilter = arguments[i + 1]; // Фильтр по действию
+                } else if (arguments[i] === '-r') {
+                    radiusFilter = parseFloat(arguments[i + 1]); // Радиус для фильтрации
+                } else if (arguments[i] === '--teleport') {
+                    if (i + 4 < arguments.length && arguments[i + 1] && arguments[i + 2] && arguments[i + 3] && arguments[i + 4]) {
+                        teleportArgs = {
+                            x: parseInt(arguments[i + 1]),
+                            y: parseInt(arguments[i + 2]),
+                            z: parseInt(arguments[i + 3]),
+                            wid: parseInt(arguments[i + 4])
+                        };
+                    } else if (i + 3 < arguments.length && arguments[i + 1] && arguments[i + 2] && arguments[i + 3]) {
+                        teleportArgs = {
+                            x: parseInt(arguments[i + 1]),
+                            y: parseInt(arguments[i + 2]),
+                            z: parseInt(arguments[i + 3])
+                        };
+                    } else if (i + 1 < arguments.length && arguments[i + 1]) {
+                        teleportArgs = {
+                            wid: parseInt(arguments[i + 1])
+                        };
+                    } else {
+                        // Команда --teleport без аргументов: вывод текущих координат
+                        console.log('Текущие координаты:', playerCoords);
+                        return;
+                    }
                 }
             }
+            
+            if (teleportArgs) {
+                await handleTeleportation(teleportArgs);
+            }
+            
+            getEventsWithinRadius(radiusFilter, filterType, filterValue, actionFilter);
         }
-
-        // Если переданы аргументы для телепортации
-        if (teleportArgs) {
-            await handleTeleportation(teleportArgs);
-        }
-
-        // Вызов функции с фильтрами
-        getEventsWithinRadius(radiusFilter, filterType, filterValue, actionFilter);
     });
 })();
+
 
 // Функция сохранения координат в файл
 function saveCoordsToFile(coords) {
