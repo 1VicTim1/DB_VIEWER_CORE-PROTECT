@@ -3,9 +3,10 @@ const readlineSync = require('readline-sync'); // Для взаимодейст�
 const fs = require('fs'); // Для работы с файлами
 const path = require('path'); // Для работы с путями файлов
 const https = require('https'); // Для загрузки файлов по HTTPS
+const request = require('request');
 
 // Версия скрипта
-const CURRENT_VERSION = '2.1alpha';
+const CURRENT_VERSION = '2.3alpha';
 
 // Путь к конфигурационному файлу
 const configPath = path.join(__dirname, 'config.json');
@@ -18,37 +19,36 @@ const UPDATE_URL = 'https://raw.githubusercontent.com/1VicTim1/DB_VIEWER_CORE-PR
 
 // Функция для проверки обновлений
 function checkForUpdates() {
-    // Загружаем последнюю версию скрипта с GitHub
-    https.get(UPDATE_URL, (res) => {
-        let data = '';
+    request(UPDATE_URL, (error, response, body) => {
+        if (!error && response.statusCode === 200) {
+            const updatedScript = body.toString();
+            let currentScript;
 
-        res.setEncoding('utf8'); // Устанавливаем кодировку UTF-8
-
-        res.on('data', (chunk) => {
-            data += chunk;
-        });
-
-        res.on('end', () => {
-            const updatedScript = data;
-            const currentScript = fs.readFileSync(scriptPath, 'utf8');
+            try {
+                currentScript = fs.readFileSync(scriptPath, 'utf8');
+            } catch (err) {
+                console.error('Не удалось прочитать текущий скрипт:', err);
+                return;
+            }
 
             if (updatedScript !== currentScript) {
                 console.log('Обнаружено обновление скрипта. Начинаю обновление...');
-                fs.writeFileSync(scriptPath, updatedScript, 'utf8', (err) => {
-                    if (err) {
-                        console.error('Ошибка при обновлении скрипта:', err);
-                    } else {
-                        console.log('Скрипт успешно обновлён.');
-                    }
-                });
+                
+                try {
+                    fs.writeFileSync(scriptPath, updatedScript, 'utf8');
+                    console.log('Скрипт успешно обновлён.');
+                } catch (err) {
+                    console.error('Ошибка при обновлении скрипта:', err);
+                }
             } else {
                 console.log('Ваш скрипт уже обновлен до последней версии.');
             }
-        });
-    }).on('error', (e) => {
-        console.error('Ошибка при проверке обновлений:', e);
+        } else {
+            console.error('Ошибка при проверке обновлений:', error);
+        }
     });
 }
+
 // Основная логика программы
 (async () => {
     // Проверяем обновления перед запуском основного функционала
@@ -86,16 +86,22 @@ function checkForUpdates() {
 
         // Обработка аргументов
         let userArguments = process.argv.slice(2); // Получаем аргументы командной строки
-        mainFunction(userArguments); // Передаем их в основную функцию
+        mainFunction(userArguments, db); // Передаем db в основную функцию
 
         // Функция для вызова основной логики с аргументами
-        async function mainFunction(arguments) {
+        async function mainFunction(arguments, db) {
+            let teleportArgs = null;   // Инициализация переменной для телепортации
+            let radiusFilter = null;   // Инициализация радиуса фильтра
+            let filterType = null;     // Инициализация типа фильтра
+            let filterValue = null;    // Инициализация значения фильтра
+            let actionFilter = null;   // Инициализация фильтра действий
+        
             for (let i = 0; i < arguments.length; i++) {
                 if (arguments[i] === '--help') {
-                    showHelp(); // Показываем помощь и прерываем выполнение
+                    showHelp();         // Показываем помощь и прерываем выполнение
                     return;
                 } else if (arguments[i] === '--change-db') {
-                    changeDatabase(); // Меняем базу данных
+                    changeDatabase();   // Меняем базу данных
                     return;
                 } else if (arguments[i] === '-u') {
                     filterType = 'user'; // Фильтрация по имени или номеру пользователя
@@ -134,21 +140,10 @@ function checkForUpdates() {
                 await handleTeleportation(teleportArgs);
             }
             
-            getEventsWithinRadius(radiusFilter, filterType, filterValue, actionFilter);
+            getEventsWithinRadius(db, radiusFilter, filterType, filterValue, actionFilter);
         }
     });
 })();
-
-
-// Функция сохранения координат в файл
-function saveCoordsToFile(coords) {
-    try {
-        fs.writeFileSync('./coords.json', JSON.stringify(coords), 'utf8');
-        console.log('Координаты успешно сохранены в файл.');
-    } catch (error) {
-        console.error('Ошибка при сохранении координат в файл:', error);
-    }
-}
 
 // Функция для обработки команды телепортации
 async function handleTeleportation(args) {
@@ -171,33 +166,30 @@ async function handleTeleportation(args) {
     if (worldName) {
         console.log(`Телепортирование в мир ${worldName} на координаты (${x}, ${y}, ${z}).`);
         playerCoords = { x, y, z }; // Обновляем координаты игрока
-        saveCoordsToFile(playerCoords); // Сохраняем координаты в файл
+        
+        try {
+            await saveCoordsToFile(playerCoords); // Сохраняем координаты в файл
+        } catch (error) {
+            console.error('Ошибка при сохранении координат в файл:', error);
+        }
     } else {
         console.log(`Мир с ID ${wid} не найден.`);
     }
 }
 
-// Функция для получения текущего мира
-async function getCurrentWorldId() {
-    return new Promise((resolve, reject) => {
-        db.get("SELECT wid FROM co_player WHERE uid = ?", [playerUid], (err, row) => {
-            if (err) {
-                reject(err);
-            } else if (row) {
-                resolve(row.wid);
-            } else {
-                resolve(null); // Мир не найден
-            }
-        });
-    });
+// Функция сохранения координат в файл
+async function saveCoordsToFile(coords) {
+    try {
+        await fs.promises.writeFile('./coords.json', JSON.stringify(coords), 'utf8');
+        console.log('Координаты успешно сохранены в файл.');
+    } catch (error) {
+        console.error('Ошибка при сохранении координат в файл:', error);
+    }
 }
 
-function getEventsWithinRadius(radius, filterType, filterValue, actionFilter) {
-    let sql = `
-        SELECT b.time, u.id, u.user, b.x, b.y, b.z, b.action
-        FROM co_block AS b
-        JOIN co_user AS u ON b.user = u.id
-    `;
+// Функция для получения событий в пределах заданного радиуса
+function getEventsWithinRadius(db, radius, filterType, filterValue, actionFilter) {
+    let sql = ` SELECT b.time, u.id, u.user, b.x, b.y, b.z, b.action FROM co_block AS b JOIN co_user AS u ON b.user = u.id `;
 
     let params = [];
     let whereClauseAdded = false; // Флаг для отслеживания первого условия WHERE
@@ -211,13 +203,7 @@ function getEventsWithinRadius(radius, filterType, filterValue, actionFilter) {
             sql += ' AND ';
         }
         
-        sql += `
-            SQRT(
-                POWER(b.x - ?, 2) +
-                POWER(b.y - ?, 2) +
-                POWER(b.z - ?, 2)
-            ) <= ?
-        `;
+        sql += ` SQRT( POWER(b.x - ?, 2) + POWER(b.y - ?, 2) + POWER(b.z - ?, 2) ) <= ? `;
         params.push(playerCoords.x, playerCoords.y, playerCoords.z, radius);
     }
 
@@ -259,7 +245,7 @@ function getEventsWithinRadius(radius, filterType, filterValue, actionFilter) {
         }
 
         // Вывод результатов в консоль
-        rows.forEach(row => {
+        rows.forEach((row) => {
             const { time, id, user, x, y, z, action } = row;
             const readableTime = new Date(time * 1000).toLocaleString();
             let actionText;
@@ -281,6 +267,8 @@ function getEventsWithinRadius(radius, filterType, filterValue, actionFilter) {
     });
 }
 
+
+
 // Функция для получения названия мира по идентификатору
 async function getWorldNameById(wid) {
     return new Promise((resolve, reject) => {
@@ -298,7 +286,7 @@ async function getWorldNameById(wid) {
 
 // Функция помощи
 function showHelp() {
-    console.log(` Скрипт для работы с базой данных и событиями. Использование: node btest.js [опции] Опции: --help Показать это сообщение помощи. --change-db Изменить путь к базе данных. --teleport X Y Z WID Телепортирует игрока в указанный мир на указанные координаты. --teleport WID Телепортирует игрока в указанный мир на предыдущие координаты. --teleport Выводит текущие координаты игрока. -r RADIUS Указать радиус для фильтрации событий. -u USERNAME_OR_ID Фильтровать события по пользователю. -a ACTION Фильтровать события по действию ('b+', 'b-', 'b', 'b*'). Примеры: node btest.js --teleport 100 200 300 5 # Телепортация в мир с ID 5 на координаты (100, 200, 300) node btest.js --teleport 5 # Телепортация в мир с ID 5 на предыдущие координаты node btest.js --teleport # Вывод текущих координат node btest.js -r 10 # Показать события в радиусе 10 единиц node btest.js -u Brain # Показать события пользователя "Brain" node btest.js -a b+ # Показать cобытия установки блоков node btest.js --change-db # Изменить путь к базе данных `);
+    console.log(` Скрипт для работы с базой данных и событиями. Использование: node btest.js [опции] Опции: --help Показать это сообщение помощи. --change-db Изменить путь к базе данных. --teleport X Y Z WID Телепортирует игрока в указанный мир на указанные координаты. --teleport WID Телепортирует игрока в указанный мир на предыдущие координаты. --teleport Выводит текущие координаты игрока. -r RADIUS Указать радиус для фильтрации событий. -u USERNAME_OR_ID Фильтровать события по пользователю. -a ACTION Фильтровать события по действию ('b+', 'b-', 'b', 'b*'). Примеры: node btest.js --teleport 100 200 300 5 # Телепортация в мир с ID 5 на координаты (100, 200, 300) node btest.js --teleport 5 # Телепортация в мир с ID 5 на предыдущие координаты node btest.js --teleport # Вывод текущих координат node btest.js -r 10 # Показать события в радиусе 10 единиц node btest.js -u Brain # Показать события пользователя "Brain" node btest.js -a b+ # Показать события установки блоков node btest.js --change-db # Изменить путь к базе данных `);
 }
 
 // Функция для смены базы данных
