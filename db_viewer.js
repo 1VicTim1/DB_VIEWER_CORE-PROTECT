@@ -20,12 +20,18 @@ const UPDATE_URL = 'https://raw.githubusercontent.com/1VicTim1/DB_VIEWER_CORE-PR
 function checkForUpdates() {
     // Загружаем последнюю версию скрипта с GitHub
     https.get(UPDATE_URL, (res) => {
+        let data = '';
+
+        res.setEncoding('utf8'); // Устанавливаем кодировку UTF-8
+
         res.on('data', (chunk) => {
-            // Сравниваем содержимое загруженного файла с текущим скриптом
-            const updatedScript = chunk.toString();
+            data += chunk;
+        });
+
+        res.on('end', () => {
+            const updatedScript = data;
             const currentScript = fs.readFileSync(scriptPath, 'utf8');
 
-            // Если содержимое отличается, заменяем текущий скрипт новым
             if (updatedScript !== currentScript) {
                 console.log('Обнаружено обновление скрипта. Начинаю обновление...');
                 fs.writeFileSync(scriptPath, updatedScript, 'utf8', (err) => {
@@ -43,7 +49,6 @@ function checkForUpdates() {
         console.error('Ошибка при проверке обновлений:', e);
     });
 }
-
 // Основная логика программы
 (async () => {
     // Проверяем обновления перед запуском основного функционала
