@@ -6,7 +6,7 @@ const https = require('https'); // Для загрузки файлов по HTT
 const request = require('request');
 
 // Версия скрипта
-const CURRENT_VERSION = '2.3alpha';
+const CURRENT_VERSION = '2.1alpha';
 
 // Путь к конфигурационному файлу
 const configPath = path.join(__dirname, 'config.json');
