@@ -5,7 +5,7 @@ const path = require('path'); // Для работы с путями файло�
 const https = require('https'); // Для загрузки файлов по HTTPS
 
 // Версия скрипта
-const CURRENT_VERSION = '2.06dev';
+const CURRENT_VERSION = '2.1dev';
 
 // Путь к конфигурационному файлу
 const configPath = path.join(__dirname, 'config.json');
