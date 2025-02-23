@@ -2,110 +2,134 @@ const sqlite3 = require('sqlite3').verbose();
 const readlineSync = require('readline-sync'); // Для взаимодействия с пользователем
 const fs = require('fs'); // Для работы с файлами
 const path = require('path'); // Для работы с путями файлов
+const https = require('https'); // Для загрузки файлов по HTTPS
+
+// Версия скрипта
+const CURRENT_VERSION = '2.06dev';
 
 // Путь к конфигурационному файлу
 const configPath = path.join(__dirname, 'config.json');
 
-// Инициализация переменной dbPath
-let dbPath;
+// Путь к скрипту
+const scriptPath = path.join(__dirname, 'db_viewer.js');
 
-// Проверяем существование конфигурационного файла
-if (!fs.existsSync(configPath)) {
-    // Если файл не существует, запрашиваем путь к базе данных
-    dbPath = readlineSync.question('Укажите путь к базе данных (.db): ');
-    const dbDir = path.dirname(dbPath);
+// Адрес репозитория на GitHub
+const UPDATE_URL = 'https://raw.githubusercontent.com/1VicTim1/DB_VIEWER_CORE-PROTECT/main/db_viewer.js';
 
-    // Проверяем существование указанной папки
-    if (!fs.existsSync(dbDir)) {
-        console.error(`Указанная директория "${dbDir}" не существует.`);
-        process.exit(1);
+// Функция для проверки обновлений
+function checkForUpdates() {
+    // Загружаем последнюю версию скрипта с GitHub
+    https.get(UPDATE_URL, (res) => {
+        res.on('data', (chunk) => {
+            // Сравниваем содержимое загруженного файла с текущим скриптом
+            const updatedScript = chunk.toString();
+            const currentScript = fs.readFileSync(scriptPath, 'utf8');
+            
+            // Если содержимое отличается, заменяем текущий скрипт новым
+            if (updatedScript !== currentScript) {
+                console.log('Обнаружено обновление скрипта. Начинаю обновление...');
+                fs.writeFileSync(scriptPath, updatedScript, 'utf8', (err) => {
+                    if (err) {
+                        console.error('Ошибка при обновлении скрипта:', err);
+                    } else {
+                        console.log('Скрипт успешно обновлён.');
+                    }
+                });
+            } else {
+                console.log('Ваш скрипт уже обновлен до последней версии.');
+            }
+        });
+    }).on('error', (e) => {
+        console.error('Ошибка при проверке обновлений:', e);
+    });
+}
+
+// Основная логика программы
+(async () => {
+    // Проверяем обновления перед запуском основного функционала
+    checkForUpdates();
+
+    // Определение dbPath
+    let dbPath;
+    if (!fs.existsSync(configPath)) {
+        // Если файл не существует, запрашиваем путь к базе данных
+        dbPath = readlineSync.question('Укажите путь к базе данных (.db): ');
+        const dbDir = path.dirname(dbPath);
+
+        // Проверяем существование указанной папки
+        if (!fs.existsSync(dbDir)) {
+            console.error(`Указанная директория "${dbDir}" не существует.`);
+            process.exit(1);
+        }
+
+        // Сохраняем путь в конфигурационный файл
+        fs.writeFileSync(configPath, JSON.stringify({ dbPath }), 'utf8');
+        console.log('Конфигурация сохранена.');
+    } else {
+        // Читаем путь из конфигурационного файла
+        const configData = fs.readFileSync(configPath, 'utf8');
+        dbPath = JSON.parse(configData).dbPath;
     }
 
-    // Сохраняем путь в конфигурационный файл
-    fs.writeFileSync(configPath, JSON.stringify({ dbPath }), 'utf8');
-    console.log('Конфигурация сохранена.');
-} else {
-    // Читаем путь из конфигурационного файла
-    const configData = fs.readFileSync(configPath, 'utf8');
-    dbPath = JSON.parse(configData).dbPath;
-}
-
-// Текущие координаты игрока (по умолчанию 0, 0, 0)
-let playerCoords = { x: 0, y: 0, z: 0 };
-
-// Загрузка координат из файла
-try {
-    const coordsData = fs.readFileSync('./coords.json', 'utf8');
-    playerCoords = JSON.parse(coordsData);
-    console.log('Загружены координаты:', playerCoords);
-} catch (error) {
-    console.log('Не удалось загрузить координаты из файла. Используются начальные координаты.');
-}
-
-// Подключение к базе данных
-let db = new sqlite3.Database(dbPath, sqlite3.OPEN_READWRITE, async (err) => {
+    // Подключение к базе данных
+    let db = new sqlite3.Database(dbPath, sqlite3.OPEN_READWRITE, async(err) => {
     if (err) {
         console.error(err.message);
         return;
     }
     console.log('Connected to the database');
 
-    // Получение аргументов из командной строки
-    const userArguments = process.argv.slice(2);
-    let filterType = null;
-    let filterValue = null;
-    let actionFilter = null;
-    let radiusFilter = null;
-    let teleportArgs = null;
 
-    // Обработка аргументов
-    for (let i = 0; i < userArguments.length; i++) {
-        if (userArguments[i] === '--help') {
-            showHelp(); // Показываем помощь и прерываем выполнение
-            return;
-        } else if (userArguments[i] === '--change-db') {
-            changeDatabase(); // Меняем базу данных
-            return;
-        } else if (userArguments[i] === '-u') {
-            filterType = 'user'; // Фильтрация по имени или номеру пользователя
-            filterValue = userArguments[i + 1]?.trim();
-        } else if (userArguments[i] === '-a') {
-            actionFilter = userArguments[i + 1]; // Фильтр по действию
-        } else if (userArguments[i] === '-r') {
-            radiusFilter = parseFloat(userArguments[i + 1]); // Радиус для фильтрации
-        } else if (userArguments[i] === '--teleport') {
-            if (i + 4 < userArguments.length && userArguments[i + 1] && userArguments[i + 2] && userArguments[i + 3] && userArguments[i + 4]) {
-                teleportArgs = {
-                    x: parseInt(userArguments[i + 1]),
-                    y: parseInt(userArguments[i + 2]),
-                    z: parseInt(userArguments[i + 3]),
-                    wid: parseInt(userArguments[i + 4])
-                };
-            } else if (i + 3 < userArguments.length && userArguments[i + 1] && userArguments[i + 2] && userArguments[i + 3]) {
-                teleportArgs = {
-                    x: parseInt(userArguments[i + 1]),
-                    y: parseInt(userArguments[i + 2]),
-                    z: parseInt(userArguments[i + 3])
-                };
-            } else if (i + 1 < userArguments.length && userArguments[i + 1]) {
-                teleportArgs = {
-                    wid: parseInt(userArguments[i + 1])
-                };
-            } else {
-                console.log('Неправильный синтаксис команды телепортации. Используйте: --teleport X Y Z WID или --teleport WID');
+        // Обработка аргументов
+        for (let i = 0; i < userArguments.length; i++) {
+            if (userArguments[i] === '--help') {
+                showHelp(); // Показываем помощь и прерываем выполнение
                 return;
+            } else if (userArguments[i] === '--change-db') {
+                changeDatabase(); // Меняем базу данных
+                return;
+            } else if (userArguments[i] === '-u') {
+                filterType = 'user'; // Фильтрация по имени или номеру пользователя
+                filterValue = userArguments[i + 1]?.trim();
+            } else if (userArguments[i] === '-a') {
+                actionFilter = userArguments[i + 1]; // Фильтр по действию
+            } else if (userArguments[i] === '-r') {
+                radiusFilter = parseFloat(userArguments[i + 1]); // Радиус для фильтрации
+            } else if (userArguments[i] === '--teleport') {
+                if (i + 4 < userArguments.length && userArguments[i + 1] && userArguments[i + 2] && userArguments[i + 3] && userArguments[i + 4]) {
+                    teleportArgs = {
+                        x: parseInt(userArguments[i + 1]),
+                        y: parseInt(userArguments[i + 2]),
+                        z: parseInt(userArguments[i + 3]),
+                        wid: parseInt(userArguments[i + 4])
+                    };
+                } else if (i + 3 < userArguments.length && userArguments[i + 1] && userArguments[i + 2] && userArguments[i + 3]) {
+                    teleportArgs = {
+                        x: parseInt(userArguments[i + 1]),
+                        y: parseInt(userArguments[i + 2]),
+                        z: parseInt(userArguments[i + 3])
+                    };
+                } else if (i + 1 < userArguments.length && userArguments[i + 1]) {
+                    teleportArgs = {
+                        wid: parseInt(userArguments[i + 1])
+                    };
+                } else {
+                    // Команда --teleport без аргументов: вывод текущих координат
+                    console.log('Текущие координаты:', playerCoords);
+                    return;
+                }
             }
         }
-    }
 
-    // Если переданы аргументы для телепортации
-    if (teleportArgs) {
-        await handleTeleportation(teleportArgs);
-    }
+        // Если переданы аргументы для телепортации
+        if (teleportArgs) {
+            await handleTeleportation(teleportArgs);
+        }
 
-    // Вызов функции с фильтрами
-    getEventsWithinRadius(radiusFilter, filterType, filterValue, actionFilter);
-});
+        // Вызов функции с фильтрами
+        getEventsWithinRadius(radiusFilter, filterType, filterValue, actionFilter);
+    });
+})();
 
 // Функция сохранения координат в файл
 function saveCoordsToFile(coords) {
