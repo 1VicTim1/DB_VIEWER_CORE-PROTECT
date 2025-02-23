@@ -89,59 +89,61 @@ function checkForUpdates() {
         mainFunction(userArguments, db); // Передаем db в основную функцию
 
         // Функция для вызова основной логики с аргументами
-        async function mainFunction(arguments, db) {
-            let teleportArgs = null;   // Инициализация переменной для телепортации
-            let radiusFilter = null;   // Инициализация радиуса фильтра
-            let filterType = null;     // Инициализация типа фильтра
-            let filterValue = null;    // Инициализация значения фильтра
-            let actionFilter = null;   // Инициализация фильтра действий
-        
-            for (let i = 0; i < arguments.length; i++) {
-                if (arguments[i] === '--help') {
-                    showHelp();         // Показываем помощь и прерываем выполнение
-                    return;
-                } else if (arguments[i] === '--change-db') {
-                    changeDatabase();   // Меняем базу данных
-                    return;
-                } else if (arguments[i] === '-u') {
-                    filterType = 'user'; // Фильтрация по имени или номеру пользователя
-                    filterValue = arguments[i + 1]?.trim();
-                } else if (arguments[i] === '-a') {
-                    actionFilter = arguments[i + 1]; // Фильтр по действию
-                } else if (arguments[i] === '-r') {
-                    radiusFilter = parseFloat(arguments[i + 1]); // Радиус для фильтрации
-                } else if (arguments[i] === '--teleport') {
-                    if (i + 4 < arguments.length && arguments[i + 1] && arguments[i + 2] && arguments[i + 3] && arguments[i + 4]) {
-                        teleportArgs = {
-                            x: parseInt(arguments[i + 1]),
-                            y: parseInt(arguments[i + 2]),
-                            z: parseInt(arguments[i + 3]),
-                            wid: parseInt(arguments[i + 4])
-                        };
-                    } else if (i + 3 < arguments.length && arguments[i + 1] && arguments[i + 2] && arguments[i + 3]) {
-                        teleportArgs = {
-                            x: parseInt(arguments[i + 1]),
-                            y: parseInt(arguments[i + 2]),
-                            z: parseInt(arguments[i + 3])
-                        };
-                    } else if (i + 1 < arguments.length && arguments[i + 1]) {
-                        teleportArgs = {
-                            wid: parseInt(arguments[i + 1])
-                        };
-                    } else {
-                        // Команда --teleport без аргументов: вывод текущих координат
-                        console.log('Текущие координаты:', playerCoords);
-                        return;
-                    }
-                }
+async function mainFunction(arguments, db) {
+    let teleportArgs = null;   // Инициализация переменной для телепортации
+    let radiusFilter = null;   // Инициализация радиуса фильтра
+    let filterType = null;     // Инициализация типа фильтра
+    let filterValue = null;    // Инициализация значения фильтра
+    let actionFilter = null;   // Инициализация фильтра действий
+
+    for (let i = 0; i < arguments.length; i++) {
+        const arg = arguments[i];
+
+        if (arg.startsWith('--help')) {
+            showHelp();         // Показываем помощь и прерываем выполнение
+            return;
+        } else if (arg.startsWith('--change-db')) {
+            changeDatabase();   // Меняем базу данных
+            return;
+        } else if (arg.startsWith('a:')) {
+            actionFilter = arg.split(':')[1]; // Фильтр по действию
+        } else if (arg.startsWith('r:')) {
+            radiusFilter = parseFloat(arg.split(':')[1]); // Радиус для фильтрации
+        } else if (arg.startsWith('u:')) {
+            filterType = 'user'; // Фильтрация по имени или номеру пользователя
+            filterValue = arg.split(':')[1]?.trim();
+        } else if (arg.startsWith('teleport')) {
+            if (i + 4 < arguments.length && arguments[i + 1] && arguments[i + 2] && arguments[i + 3] && arguments[i + 4]) {
+                teleportArgs = {
+                    x: parseInt(arguments[i + 1]),
+                    y: parseInt(arguments[i + 2]),
+                    z: parseInt(arguments[i + 3]),
+                    wid: parseInt(arguments[i + 4])
+                };
+            } else if (i + 3 < arguments.length && arguments[i + 1] && arguments[i + 2] && arguments[i + 3]) {
+                teleportArgs = {
+                    x: parseInt(arguments[i + 1]),
+                    y: parseInt(arguments[i + 2]),
+                    z: parseInt(arguments[i + 3])
+                };
+            } else if (i + 1 < arguments.length && arguments[i + 1]) {
+                teleportArgs = {
+                    wid: parseInt(arguments[i + 1])
+                };
+            } else {
+                // Команда --teleport без аргументов: вывод текущих координат
+                console.log('Текущие координаты:', playerCoords);
+                return;
             }
-            
-            if (teleportArgs) {
-                await handleTeleportation(teleportArgs);
-            }
-            
-            getEventsWithinRadius(db, radiusFilter, filterType, filterValue, actionFilter);
         }
+    }
+    
+    if (teleportArgs) {
+        await handleTeleportation(teleportArgs);
+    }
+    
+    getEventsWithinRadius(db, radiusFilter, filterType, filterValue, actionFilter);
+}
     });
 })();
 
